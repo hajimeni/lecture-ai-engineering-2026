@@ -138,3 +138,25 @@ def make_quiz(lecture: int) -> str:
         "question": f"「{term}」の意味は？",
         "answer": str(definition)
     }, ensure_ascii=False)
+
+def save_learning_log(question: str, answer: str) -> str:
+    """ユーザーの質問と回答をそのまま学習ログに保存する。
+    通常の質問に回答するときに使う。
+    """
+    from datetime import datetime
+    from pathlib import Path
+    from uuid import uuid4
+
+    log_dir = Path(__file__).resolve().parent.parent / "learning_log"
+    log_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = log_dir / f"{timestamp}_{uuid4().hex[:8]}.md"
+
+    path.write_text(
+        f"## 質問\n\n{question}\n\n"
+        f"## 回答\n\n{answer}\n",
+        encoding="utf-8",
+    )
+
+    return f"保存しました: {path}"

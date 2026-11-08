@@ -16,7 +16,7 @@ import inspect
 import json
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -38,16 +38,18 @@ INSTRUCTIONS = """\
 """
 
 # モデルは実行時に渡す（テストではAPIを呼ばない TestModel に差し替えるため）
-agent = Agent(instructions=INSTRUCTIONS)
+agent = Agent(instructions=INSTRUCTIONS, output_type=[str, DeferredToolRequests])
 agent.tool_plain(tools.search_glossary)
 agent.tool_plain(tools.get_lecture_summary)
 
 # TODO(第3回 演習): tools.py に make_quiz を作り、ここで登録しよう
 agent.tool_plain(tools.make_quiz)
 
+# 第3回 宿題: 学習ログを保存するツールを登録
+agent.tool_plain(requires_approval=True)(tools.save_learning_log)
+
 # 第5回: 使う MCP サーバーの設定ファイル。Claude Desktop や Cursor と同じ "mcpServers" 形式
 MCP_CONFIG = Path(__file__).resolve().parent / "mcp_servers.json"
-
 
 def load_mcp_servers(config_path: Path = MCP_CONFIG) -> list[MCPToolset]:
     """設定ファイル（mcpServers 形式）を読み、サーバーごとに接続（MCPToolset）を作る。
@@ -130,6 +132,20 @@ def main() -> None:
         print("[tools] MCP サーバー（app/mcp_servers.json）")
     try:
         result = target.run_sync(args.question, model=build_model())
+        # save_learning_log の呼び出しはCLIで利用者に保存してよいかを聞き
+        # その結果を渡して続きを実行
+        if isinstance(result.output, DeferredToolRequests):
+            approvals = {
+                call.tool_call_id: input(
+                    f"「{call.args['question']}」に対する回答を記録しますか？ [y/N]: "
+                ).strip().lower() == "y"
+                for call in result.output.approvals
+            }
+            result = target.run_sync(
+                message_history=result.all_messages(),
+                model=build_model(),
+                deferred_tool_results=DeferredToolResults(approvals=approvals),
+            )
     except ModelHTTPError as e:
         print(api_error_message(e.status_code, str(e.body)[:200]))
         raise SystemExit(1)
@@ -140,3 +156,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
