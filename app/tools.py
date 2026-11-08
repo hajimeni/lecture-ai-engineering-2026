@@ -77,3 +77,86 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から 1つを選び、
+    確認問題と答えを返す。
+    「第2回の確認問題を出して」のように、
+    復習用の問題を求められたときに使う。
+    """
+    import random
+    import re
+    # 1. load_glossary() から lecture が一致する用語を集める
+    def walk(obj, key=None):
+        if isinstance(obj, dict):
+            if "definition" in obj:
+                yield key, obj
+            for k, v in obj.items():
+                if isinstance(v, (dict, list)):
+                    yield from walk(v, k)
+        elif isinstance(obj, list):
+            for item in obj:
+                yield from walk(item, key)
+
+    candidates = []
+    for key, entry in walk(load_glossary()):
+        refs = next(
+            (entry[k] for k in (
+                "lectures", "lecture",
+                "lecture_number", "related_lectures"
+            ) if k in entry),
+            []
+        )
+        numbers = [
+            int(n) for n in re.findall(r"\d+", str(refs))
+        ]
+        if lecture not in numbers:
+            continue
+
+        term = (
+            entry.get("term")
+            or entry.get("name")
+            or entry.get("title")
+            or key
+        )
+        definition = entry.get("definition")
+        if term and definition:
+            candidates.append((term, definition))
+
+    if not candidates:
+        return json.dumps(
+            {"error": f"第{lecture}回の用語が見つかりません"},
+            ensure_ascii=False
+        )
+    
+    # 2. 1つ選ぶ（random.choice）
+    term, definition = random.choice(candidates)
+
+    # 3. 問題と答えを文字列で返す（ json.dumps など）
+    return json.dumps({
+        "question": f"「{term}」の意味は？",
+        "answer": str(definition)
+    }, ensure_ascii=False)
+
+def save_learning_log(question: str, answer: str) -> str:
+    """ユーザーの質問と回答をそのまま学習ログに保存する。
+    通常の質問に回答するときに使う。
+    """
+    from datetime import datetime
+    from pathlib import Path
+    from uuid import uuid4
+
+    log_dir = Path(__file__).resolve().parent.parent / "learning_log"
+    log_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = log_dir / f"{timestamp}_{uuid4().hex[:8]}.md"
+
+    path.write_text(
+        f"## 質問\n\n{question}\n\n"
+        f"## 回答\n\n{answer}\n",
+        encoding="utf-8",
+    )
+
+    return f"保存しました: {path}"
